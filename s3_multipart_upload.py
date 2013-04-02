@@ -13,6 +13,8 @@ import math
 import mimetypes
 from multiprocessing import Pool
 import os
+from optparse import OptionParser
+import sys
 
 from boto.s3.connection import S3Connection
 from filechunkio import FileChunkIO
@@ -82,3 +84,16 @@ def upload(bucketname, aws_key, aws_secret, source_path, keyname,
         key.set_acl(acl)
     else:
         mp.cancel_upload()
+
+    if __name__ == "__main__":
+        parser = OptionParser()
+    parser.add_option("-r", "--norr", dest="use_rr",
+                      action="store_false", default=True)
+    parser.add_option("-p", "--public", dest="make_public",
+                      action="store_true", default=False)
+    (options, args) = parser.parse_args()
+    if len(args) < 2:
+        print __doc__
+        sys.exit()
+    kwargs = dict(use_rr=options.use_rr, make_public=options.make_public)
+    upload(*args, **kwargs)

@@ -20,7 +20,7 @@ import json
 #
 from config import *
 
-DEBUG = True
+DEBUG = False
 
 #Get a list of collectors from Sumo
 #

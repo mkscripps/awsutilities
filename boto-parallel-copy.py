@@ -134,7 +134,7 @@ while 1:
             k2mpu = b2.initiate_multipart_upload(payload['targetKey'])
 
     if k2mpu is None:
-        print "File: " + payload['targetKey'] + " in Bucket: " + payload['targetBucket'] + " not copied since it exists and is the same size as the source."
+        print "File: " + payload['targetKey'] + " in Bucket: " + payload['sourceBucket'] + " not copied since it exists and is the same size as the source."
         messageQueue.delete_message(message)
     else:
         lastThread = 0
@@ -166,12 +166,14 @@ while 1:
                 lastThread = i
 
         print "Waiting for " + str(len(threads)) + " threads to complete..."
+        if lastThread != 0 and lastThread <= loops:
+            print "Adding more threads..."
         while len(threads) > 0:
             t = threads.pop()
             if len(threads) == 0:
                 t.join()
             if lastThread != 0 and lastThread <= loops:
-                print "Adding more threads..."
+                sys.stdout.write('.')
                 if (lastThread+1)*blocksize < k1size:
                     new_thread = uploadThread(payload['sourceBucket'], payload['sourceKey'], k2mpu, lastThread+1, lastThread*blocksize, (lastThread+1)*blocksize-1)
                 elif k1size == 0:

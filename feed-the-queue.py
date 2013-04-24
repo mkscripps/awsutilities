@@ -12,10 +12,10 @@
 # -a AWSRegion (optional.  Defaults to us-east-1)
 # -q QueueName (required)
 # -s SourceBucket (required)
-# -f Filter – this is a filter to use in the list bucket.  This would be useful to get everything below a certain
+# -f Filter - this is a filter to use in the list bucket. This would be useful to get everything below a certain
 #               folder. (optional)
 # -t TargetBucket (required)
-# -p Prefix – this will prepend a prefix to the name on the target bucket.  Useful for creating an alternate folder
+# -p Prefix - this will prepend a prefix to the name on the target bucket.  Useful for creating an alternate folder
 #               root in the target. (optional)
 #
 # Calling example:

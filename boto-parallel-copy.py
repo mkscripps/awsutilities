@@ -13,9 +13,9 @@
 # -a AWSRegion (optional.  Defaults to us-east-1)
 # -q QueueName (required)
 # -t MaxThreads to allow to run in parallel for a single file copy. (optional. Default is 1000)
-# -b BlockSize – this controls the multi-part copy chunks sizes (optional. Default is 10485760.  10MB)
-# -v Queue Message Visibility Timeout – this controls how long before the message is returned to the queue for another worker.  This is used in case the worker fails before the copy is complete and another worker needs to retry.  (optional. Default is 120)
-# -s Queue retries before exiting – this is the concurrent number of queue message read retries with 10s between that will occur before the process assumes the queue is empty and exits (optional. Default is 20. 200 seconds.)
+# -b BlockSize - this controls the multi-part copy chunks sizes (optional. Default is 10485760.  10MB)
+# -v Queue Message Visibility Timeout - this controls how long before the message is returned to the queue for another worker.  This is used in case the worker fails before the copy is complete and another worker needs to retry.  (optional. Default is 120)
+# -s Queue retries before exiting - this is the concurrent number of queue message read retries with 10s between that will occur before the process assumes the queue is empty and exits (optional. Default is 20. 200 seconds.)
 #
 # Calling example:
 # python boto-parallel-copy.py -q botoCopyQueue -r us-east-1 -t 1000 -b 10000000 -v 120 -s 20
@@ -24,16 +24,14 @@ __author__ = 'mkelly'
 
 import boto
 import time
-import thread
 import threading
 import boto.sqs
 import json
 import getopt
 import sys
-from boto.sqs.message import Message
 from boto.sqs.message import RawMessage
-from boto.sqs.queue import Queue
 from collections import deque
+from boto.s3.connection import OrdinaryCallingFormat
 
 
 class uploadThread(threading.Thread):
@@ -47,15 +45,10 @@ class uploadThread(threading.Thread):
         self.startByte = start
         self.endByte = end
 
-
     def run(self):
-        # print "Starting Thread: " + str(self.name)
-        mpupload(self.b1, self.k1, self.k2, self.block, self.startByte, self.endByte)
+        self.k2.copy_part_from_key(self.b1, self.k1, self.block, self.startByte, self.endByte)
+        pool.release()
 
-
-def mpupload(b1, k1, k2, block, start, end):
-    k2.copy_part_from_key(b1, k1, block, start, end)
-#print "Block " + str(block) + " uploaded."
 
 # collect inputs
 optlist, args = getopt.getopt(sys.argv[1:], 'q:r:v:b:t:s:')
@@ -64,11 +57,12 @@ optdict = dict(optlist)
 
 awsRegion = optdict['-r'] if '-r' in optlist else 'us-east-1'
 messageQueueName = optdict['-q']
-messageVisibilityTimeout = optdict['-v'] if '-v' in optdict else 60*2
-maxthreads = optdict['-t'] if '-t' in optdict else 1000
-blocksize = optdict['-b'] if '-b' in optdict else 1024*1024*10
-maxMissesBeforeShutdown = optdict['-s'] if '-s' in optdict else 20
+messageVisibilityTimeout = int(optdict['-v']) if '-v' in optdict else 60*2
+maxthreads = int(optdict['-t']) if '-t' in optdict else 100
+blocksize = int(optdict['-b']) if '-b' in optdict else 1024*1024*10
+maxMissesBeforeShutdown = int(optdict['-s']) if '-s' in optdict else 20
 
+pool = threading.BoundedSemaphore(value=maxthreads)
 # make sure the queue is available
 sqs = boto.sqs.connect_to_region(awsRegion)
 messageQueue = sqs.get_queue(messageQueueName)
@@ -99,7 +93,7 @@ while 1:
 
     print payload
 
-    start = time.clock()
+    start = time.time()
 
     k2mpu = None
     k1size = 0
@@ -124,7 +118,7 @@ while 1:
         messageQueue.delete_message(message)
         continue
     else:
-        k1size = k1.size
+        k1size = int(k1.size)
 
     if k1.size == 0:
         k1.copy(payload['targetBucket'], payload['targetKey'])
@@ -134,8 +128,8 @@ while 1:
     if k2 is None:
         k2mpu = b2.initiate_multipart_upload(payload['targetKey'])
     elif k2 is not None:
-        k1size = k1.size
-        k2size = k2.size
+        k1size = int(k1.size)
+        k2size = int(k2.size)
         if k1size != k2size:
             k2mpu = b2.initiate_multipart_upload(payload['targetKey'])
 
@@ -144,8 +138,8 @@ while 1:
         messageQueue.delete_message(message)
     else:
         lastThread = 0
-
-        loops = k1size / blocksize + 1
+        loops = int(k1size) /int(blocksize) + 1
+        print "loops: %i" % loops
 
         threads = deque()
 
@@ -157,6 +151,7 @@ while 1:
                     new_thread = uploadThread(payload['sourceBucket'], payload['sourceKey'], k2mpu, i+1, i*blocksize, (i+1)*blocksize-1)
                 else:
                     new_thread = uploadThread(payload['sourceBucket'], payload['sourceKey'], k2mpu, i+1, i*blocksize, k1size-1)
+                pool.acquire()
                 new_thread.start()
                 threads.append(new_thread)
         else:
@@ -165,6 +160,7 @@ while 1:
                     new_thread = uploadThread(payload['sourceBucket'], payload['sourceKey'], k2mpu, i+1, i*blocksize, (i+1)*blocksize-1)
                 else:
                     new_thread = uploadThread(payload['sourceBucket'], payload['sourceKey'], k2mpu, i+1, i*blocksize, k1size-1)
+                pool.acquire()
                 new_thread.start()
                 threads.append(new_thread)
                 lastThread = i
@@ -172,7 +168,8 @@ while 1:
         print "Waiting for " + str(len(threads)) + " threads to complete..."
         while len(threads) > 0:
             t = threads.pop()
-            t.join()
+            if len(threads) == 0:
+                t.join()
             if lastThread != 0 and lastThread <= loops:
                 print "Adding more threads..."
                 if (lastThread+1)*blocksize < k1size:
@@ -180,17 +177,17 @@ while 1:
                 elif k1size == 0:
                     new_thread = uploadThread(payload['sourceBucket'], payload['sourceKey'], k2mpu, lastThread+1, lastThread*blocksize, 0)
                 else:
-                    new_thread = uploadThread(payload['sourceBucket'], payload['sourceKey'], k2mpu, lastThread+1, lastThread*blocksize, k1size-1)
+                    if lastThread*blocksize < (k1size-1):
+                        new_thread = uploadThread(payload['sourceBucket'], payload['sourceKey'], k2mpu, lastThread+1, lastThread*blocksize, k1size-1)
+                    break
+                pool.acquire()
                 new_thread.start()
                 threads.append(new_thread)
-                lastThread = lastThread + 1
-
-
+                lastThread += 1
         print "Threads completed."
         k2mpu.complete_upload()
         messageQueue.delete_message(message)
-
-        print "Total upload time for Key: " + payload['targetKey'] + " in "+ str(time.clock() - start) + " seconds."
+        print "Total upload time for Key: " + payload['targetKey'] + " in "+ str(time.time() - start) + " seconds."
 
 
 

@@ -11,7 +11,7 @@ __author__ = 'mkelly'
 
 import requests
 
-headers = {'x-api-key': '24429695e098e3e2ed8fd1ac503c6318c09ee3da9af7754'}
+headers = {'x-api-key': 'xxxxxxxxxxxxxxxxxxx'}
 accountID = "209454"
 
 #https://api.newrelic.com/api/v1/accounts.xml
